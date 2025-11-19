@@ -1,0 +1,46 @@
+import os, sys, time, json, glob, datetime
+import serial
+
+BAUD = 115200
+PORT_HINTS = ["/dev/cu.SLAB_USBtoUART", "/dev/cu.wchusbserial*", "/dev/cu.usbmodem*"]
+ROOM = sys.argv[1] if len(sys.argv) > 1 else ""  # optional label
+
+def find_port():
+    for pat in PORT_HINTS:
+        for p in glob.glob(pat):
+            return p
+    return None
+
+def csv_path():
+    day = datetime.date.today().isoformat()
+    os.makedirs("logs", exist_ok=True)
+    return os.path.join("logs", f"sensors_{day}.csv")
+
+def ensure_header(path):
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        with open(path, "w") as f:
+            f.write("timestamp,room,raqi_mV,raqi_volt,noise_rms,noise_spikes\n")
+
+while True:
+    port = find_port()
+    if not port:
+        time.sleep(2); continue
+    try:
+        with serial.Serial(port, BAUD, timeout=2) as ser:
+            path = csv_path(); ensure_header(path)
+            with open(path, "a") as out:
+                while True:
+                    line = ser.readline().decode(errors="ignore").strip()
+                    if not line:
+                        if datetime.date.today().isoformat() not in path: break
+                        continue
+                    try:
+                        o = json.loads(line)
+                        ts = datetime.datetime.now().isoformat(timespec="seconds")
+                        out.write(f"{ts},{ROOM},{o.get('raqi_mV','')},{o.get('raqi_volt','')},"
+                                  f"{o.get('noise_rms','')},{o.get('noise_spikes','')}\n")
+                        out.flush()
+                    except json.JSONDecodeError:
+                        pass
+    except Exception:
+        time.sleep(2)
